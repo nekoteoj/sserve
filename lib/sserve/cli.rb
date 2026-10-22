@@ -50,7 +50,8 @@ module Sserve
         port: options.fetch(:port, 8080),
         index: options.fetch(:index, "index.html"),
         password: password,
-        listings: options.fetch(:listings, false)
+        listings: options.fetch(:listings, false),
+        prefix: options[:prefix]
       )
     end
 
@@ -68,6 +69,7 @@ module Sserve
         parser.on("-d", "--directory DIR", "Directory to serve (default: .)") { |dir| options[:directory] = dir }
         parser.on("-b", "--bind HOST", "Bind address (default: 127.0.0.1)") { |host| options[:host] = host }
         parser.on("-p", "--port PORT", Integer, "Port (default: 8080)") { |port| options[:port] = port }
+        parser.on("--prefix PATH", "URL prefix to strip once (default: none)") { |path| options[:prefix] = path }
         parser.on("-i", "--index NAME", "Index filename (default: index.html)") { |name| options[:index] = name }
         parser.on("-P", "--password PASS", "Shared password. Omit for no authentication") { |pass| options[:password] = pass }
         parser.on("--password-env VAR", "Read the password from an environment variable") { |var| options[:password_env] = var }
@@ -78,7 +80,7 @@ module Sserve
     end
 
     def self.banner(config)
-      lines = ["sserve: http://#{config.host}:#{config.port}/", "sserve: serving #{config.root}"]
+      lines = ["sserve: http://#{config.host}:#{config.port}#{config.prefix}/", "sserve: serving #{config.root}"]
       lines << (config.auth_required? ? "sserve: password protection on" : "sserve: no password set")
       lines << (config.listings ? "sserve: directory listings on" : "sserve: directory listings off")
       lines.join("\n")

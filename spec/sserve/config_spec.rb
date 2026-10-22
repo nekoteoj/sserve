@@ -17,6 +17,7 @@ RSpec.describe Sserve::Config do
     expect(config.index).to eq("index.html")
     expect(config.password).to be_nil
     expect(config.listings).to be(false)
+    expect(config.prefix).to eq("")
     expect(config.auth_required?).to be(false)
     expect(config.session_secret.bytesize).to be >= 64
   ensure
@@ -73,6 +74,25 @@ RSpec.describe Sserve::Config do
       .to raise_error(described_class::Error, /index/)
     expect { described_class.new(root: root, index: "nested/index.html") }
       .to raise_error(described_class::Error, /index/)
+  ensure
+    FileUtils.remove_entry(root) if root
+  end
+
+  it "accepts a mount prefix and drops a trailing slash" do
+    root = write_root
+    expect(described_class.new(root: root, prefix: "/files").prefix).to eq("/files")
+    expect(described_class.new(root: root, prefix: "/tools/files/").prefix).to eq("/tools/files")
+    expect(described_class.new(root: root, prefix: "/").prefix).to eq("")
+  ensure
+    FileUtils.remove_entry(root) if root
+  end
+
+  it "rejects a prefix that is not a plain absolute path" do
+    root = write_root
+    ["files", "//files", "/../files", "/files/../secret", "/files//docs", "/files/./docs", "/files?x=1", "https://evil.test/files"].each do |prefix|
+      expect { described_class.new(root: root, prefix: prefix) }
+        .to raise_error(described_class::Error, /prefix/)
+    end
   ensure
     FileUtils.remove_entry(root) if root
   end

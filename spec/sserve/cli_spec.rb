@@ -74,6 +74,29 @@ RSpec.describe Sserve::CLI do
     expect(err).to include("MISSING_SSERVE_PASSWORD")
   end
 
+  it "accepts a prefix and prints it in the listen url" do
+    Dir.mktmpdir("sserve-cli") do |dir|
+      started = nil
+      server = double(start: nil)
+      allow(server).to receive(:start) { |config| started = config }
+
+      code, _, err = run("--directory", dir, "--prefix", "/files/", server: server)
+
+      expect(code).to eq(0)
+      expect(started.prefix).to eq("/files")
+      expect(err).to include("http://127.0.0.1:8080/files/")
+    end
+  end
+
+  it "rejects a prefix that is not an absolute path" do
+    Dir.mktmpdir("sserve-cli") do |dir|
+      code, _, err = run("--directory", dir, "--prefix", "files", server: double(start: nil))
+
+      expect(code).to eq(1)
+      expect(err).to include("prefix")
+    end
+  end
+
   it "warns when binding a public address without a password" do
     Dir.mktmpdir("sserve-cli") do |dir|
       code, _, err = run("--directory", dir, "--bind", "0.0.0.0", server: double(start: nil))

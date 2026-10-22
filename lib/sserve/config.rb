@@ -11,10 +11,10 @@ module Sserve
     SESSION_IDLE_SECONDS = 12 * 60 * 60
     LOCAL_HOSTS = %w[127.0.0.1 localhost ::1].freeze
 
-    attr_reader :root, :host, :port, :index, :password, :listings, :session_secret, :session_idle_seconds
+    attr_reader :root, :host, :port, :index, :password, :listings, :prefix, :session_secret, :session_idle_seconds
 
     def initialize(root:, host: "127.0.0.1", port: 8080, index: "index.html", password: nil,
-      listings: false, session_secret: nil, session_idle_seconds: SESSION_IDLE_SECONDS)
+      listings: false, prefix: nil, session_secret: nil, session_idle_seconds: SESSION_IDLE_SECONDS)
       @root = self.class.expand_root(root)
       @host = host.to_s
       raise Error, "host is required" if @host.empty?
@@ -22,6 +22,7 @@ module Sserve
       @index = self.class.parse_index(index)
       @password = password.nil? || password.empty? ? nil : password.to_s
       @listings = listings ? true : false
+      @prefix = self.class.parse_prefix(prefix)
       @session_idle_seconds = Integer(session_idle_seconds)
       raise Error, "session idle seconds must be positive" unless @session_idle_seconds.positive?
       @session_secret = session_secret || SecureRandom.bytes(64)
@@ -64,6 +65,24 @@ module Sserve
       end
 
       name
+    end
+
+    # Mount path seen by the browser. Empty means the app is at the origin root.
+    # A trailing slash is removed so stripping and link generation share one form.
+    def self.parse_prefix(value)
+      text = value.to_s
+      return "" if text.empty? || text == "/"
+      raise Error, "prefix must be an absolute path" unless text.start_with?("/")
+      raise Error, "prefix must be an absolute path" if text.start_with?("//") || text.include?("\\") || text.include?("?") || text.include?("#")
+      raise Error, "prefix must be an absolute path" if text.match?(/[\x00-\x1f\x7f]/)
+
+      text = text.delete_suffix("/")
+      segments = text.split("/", -1)
+      if segments.drop(1).any? { |segment| segment.empty? || segment == "." || segment == ".." }
+        raise Error, "prefix must be an absolute path"
+      end
+
+      text
     end
   end
 end
