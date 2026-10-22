@@ -11,8 +11,8 @@
     <% if @error %>
       <p class="alert" role="alert"><%= @error %></p>
     <% end %>
-    <form method="post" action="/_sserve/login">
-      <%== csrf_tag("/_sserve/login") %>
+    <form method="post" action="<%= login_path %>">
+      <%== csrf_tag(login_path) %>
       <input type="hidden" name="return_to" value="<%= @return_to %>">
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" enterkeyhint="go" autofocus required>

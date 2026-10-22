@@ -39,7 +39,8 @@ module Sserve
           secret: config.session_secret,
           key: SESSION_KEY,
           max_idle_seconds: config.session_idle_seconds,
-          max_seconds: nil
+          max_seconds: nil,
+          cookie_options: { path: config.prefix.empty? ? "/" : config.prefix }
         klass.plugin :route_csrf do |_request|
           response.status = 403
           @title = "Forbidden"
@@ -47,7 +48,7 @@ module Sserve
           view("error")
         end
       end
-      klass.freeze.app
+      Mount.new(klass.freeze.app, config.prefix)
     end
 
     route do |r|
@@ -58,7 +59,7 @@ module Sserve
           next render_missing unless config.auth_required?
 
           r.get do
-            next request.redirect(safe_return_to) if authenticated?
+            next request.redirect(public_path(safe_return_to)) if authenticated?
 
             render_login
           end
@@ -74,7 +75,7 @@ module Sserve
 
           check_csrf!
           session.clear
-          request.redirect "/_sserve/login"
+          request.redirect login_path
         end
 
         render_missing
@@ -115,6 +116,24 @@ module Sserve
       "#{time.day} #{MONTHS[time.month - 1]} #{time.year}"
     end
 
+    # Browser path for an internal path. script_name is the mount prefix after
+    # Mount strips it from PATH_INFO, or empty when the app is at the origin root.
+    def public_path(internal)
+      prefix = request.script_name.to_s
+      return internal if prefix.empty?
+      return prefix if internal == "/"
+
+      "#{prefix}#{internal}"
+    end
+
+    def login_path
+      public_path("/_sserve/login")
+    end
+
+    def logout_path
+      public_path("/_sserve/logout")
+    end
+
     private
 
     def config
@@ -146,7 +165,12 @@ module Sserve
     end
 
     def login_url
-      "/_sserve/login?return_to=#{Rack::Utils.escape(request.fullpath)}"
+      "#{login_path}?return_to=#{Rack::Utils.escape(internal_fullpath)}"
+    end
+
+    def internal_fullpath
+      query = request.query_string
+      query.nil? || query.empty? ? request.path_info : "#{request.path_info}?#{query}"
     end
 
     def safe_return_to
@@ -163,7 +187,7 @@ module Sserve
       destination = safe_return_to
       if authenticator.valid?(string_param("password"))
         session["authenticated"] = true
-        request.redirect destination
+        request.redirect public_path(destination)
       else
         render_login(error: "Incorrect password.", status: 401)
       end
@@ -178,7 +202,7 @@ module Sserve
     end
 
     def serve_current
-      result = catalog.lookup(request.path)
+      result = catalog.lookup(request.path_info)
       redirect_directory(result.directory_path) if result.directory_path
 
       case result.type
@@ -207,10 +231,11 @@ module Sserve
 
     def redirect_directory(real)
       target = directory_url_path(real)
-      return if request.path == target
+      return if request.path_info == target
 
       query = request.query_string
-      request.redirect(query.nil? || query.empty? ? target : "#{target}?#{query}")
+      location = public_path(target)
+      request.redirect(query.nil? || query.empty? ? location : "#{location}?#{query}")
     end
 
     def directory_url_path(real)
@@ -271,6 +296,32 @@ module Sserve
 
     def close_body(body)
       body.close if body.respond_to?(:close)
+    end
+  end
+
+  # Moves a configured mount prefix from PATH_INFO onto SCRIPT_NAME once.
+  # The proxy must forward the prefix unchanged. Stripping it again would make
+  # a directory of the same name resolve to the wrong file.
+  class App::Mount
+    def initialize(app, prefix)
+      @app = app
+      @prefix = prefix.to_s
+    end
+
+    def call(env)
+      strip(env) unless @prefix.empty?
+      @app.call(env)
+    end
+
+    private
+
+    def strip(env)
+      path = env["PATH_INFO"].to_s
+      return unless path == @prefix || path.start_with?("#{@prefix}/")
+
+      rest = path.delete_prefix(@prefix)
+      env["SCRIPT_NAME"] = "#{env["SCRIPT_NAME"]}#{@prefix}"
+      env["PATH_INFO"] = rest.empty? ? "/" : rest
     end
   end
 end

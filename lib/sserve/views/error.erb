@@ -3,8 +3,8 @@
     <h1><%= @title %></h1>
     <p class="lede"><%= @message %></p>
     <% if @authenticated %>
-      <form method="post" action="/_sserve/logout">
-        <%== csrf_tag("/_sserve/logout") %>
+      <form method="post" action="<%= logout_path %>">
+        <%== csrf_tag(logout_path) %>
         <button class="text-button" type="submit">Sign Out</button>
       </form>
     <% end %>

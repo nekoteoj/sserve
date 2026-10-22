@@ -1,14 +1,14 @@
 <header class="bar">
   <div class="bar__side">
     <% if @parent %>
-      <a class="bar__button" href="<%= @parent %>">Back</a>
+      <a class="bar__button" href="<%= public_path(@parent) %>">Back</a>
     <% end %>
   </div>
   <h1 class="bar__title"><%= @title %></h1>
   <div class="bar__side bar__side--end">
     <% if @authenticated %>
-      <form method="post" action="/_sserve/logout">
-        <%== csrf_tag("/_sserve/logout") %>
+      <form method="post" action="<%= logout_path %>">
+        <%== csrf_tag(logout_path) %>
         <button class="bar__button" type="submit">Sign Out</button>
       </form>
     <% end %>
@@ -21,7 +21,7 @@
     <ul class="list">
       <% @entries.each do |entry| %>
         <li>
-          <a class="row" href="<%= entry.href %>">
+          <a class="row" href="<%= public_path(entry.href) %>">
             <span class="glyph <%= entry.directory ? "glyph--folder" : "glyph--file" %>" aria-hidden="true">
               <% if entry.directory %>
                 <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M3.5 7.2A2.2 2.2 0 0 1 5.7 5h3.1c.5 0 1 .2 1.3.6l1 1.2h7.2A2.2 2.2 0 0 1 20.5 9v8.3a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2V7.2Z"/></svg>

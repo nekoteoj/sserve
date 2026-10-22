@@ -23,6 +23,7 @@ RSpec.describe Sserve::App do
       password: overrides.fetch(:password, nil),
       listings: overrides.fetch(:listings, false),
       index: overrides.fetch(:index, "index.html"),
+      prefix: overrides.fetch(:prefix, nil),
       session_secret: "s" * 64,
       session_idle_seconds: overrides.fetch(:session_idle_seconds, 12 * 60 * 60)
     )
@@ -250,5 +251,116 @@ RSpec.describe Sserve::App do
     allow(Time).to receive(:now).and_return(now + 11)
     get "/hello.txt"
     expect(last_response).to be_redirect
+  end
+
+  describe "with a mount prefix" do
+    it "strips the prefix once, including when a directory has the same name" do
+      File.write(File.join(@root, "index.html"), "root-index")
+      File.write(File.join(@root, "filesomething.txt"), "lookalike")
+      Dir.mkdir(File.join(@root, "files"))
+      File.write(File.join(@root, "files", "index.html"), "nested-index")
+      config(prefix: "/files")
+
+      get "/files"
+      expect(last_response.status).to eq(200)
+      expect(last_response.body).to eq("root-index")
+
+      get "/files/files"
+      expect(last_response).to be_redirect
+      expect(last_response.location).to eq("/files/files/")
+
+      follow_redirect!
+      expect(last_response.status).to eq(200)
+      expect(last_response.body).to eq("nested-index")
+
+      get "/filesomething.txt"
+      expect(last_response.status).to eq(200)
+      expect(last_response.body).to eq("lookalike")
+
+      get "/hello.txt"
+      expect(last_response.status).to eq(200)
+      expect(last_response.body).to eq("hi")
+    end
+
+    it "keeps login, listings, and the session cookie under the prefix" do
+      Dir.mkdir(File.join(@root, "docs"))
+      File.write(File.join(@root, "docs", "note.txt"), "n")
+      config(password: "s3cret", listings: true, prefix: "/tools/files")
+
+      get "/tools/files/docs"
+      expect(last_response).to be_redirect
+      expect(last_response.location).to eq("/tools/files/_sserve/login?return_to=%2Fdocs")
+
+      get "/tools/files/hello.txt?x=1"
+      expect(last_response.location).to eq("/tools/files/_sserve/login?return_to=%2Fhello.txt%3Fx%3D1")
+
+      get "/tools/files/_sserve/login", { "return_to" => "/hello.txt" }
+      expect(last_response.body).to include('action="/tools/files/_sserve/login"')
+      expect(last_response.body).to include('value="/hello.txt"')
+      token = csrf_from(last_response.body, "/tools/files/_sserve/login")
+      post "/tools/files/_sserve/login", {
+        "password" => "s3cret",
+        "return_to" => "/hello.txt",
+        "_csrf" => token
+      }
+      expect(last_response).to be_redirect
+      expect(last_response.location).to eq("/tools/files/hello.txt")
+      expect(last_response.headers["set-cookie"]).to include("path=/tools/files")
+
+      get last_response.location
+      expect(last_response.status).to eq(200)
+      expect(last_response.body).to eq("hi")
+
+      get "/tools/files/_sserve/login", { "return_to" => "/hello.txt" }
+      expect(last_response).to be_redirect
+      expect(last_response.location).to eq("/tools/files/hello.txt")
+
+      get "/tools/files/"
+      expect(last_response.body).to include('href="/tools/files/hello.txt"')
+      expect(last_response.body).to include('href="/tools/files/docs/"')
+      expect(last_response.body).to include('action="/tools/files/_sserve/logout"')
+
+      get "/tools/files/docs?x=1"
+      expect(last_response.location).to eq("/tools/files/docs/?x=1")
+      follow_redirect!
+      expect(last_response.body).to include('href="/tools/files"')
+      expect(last_response.body).to include("note.txt")
+
+      get "/tools/files/"
+      token = csrf_from(last_response.body, "/tools/files/_sserve/logout")
+      post "/tools/files/_sserve/logout", { "_csrf" => token }
+      expect(last_response).to be_redirect
+      expect(last_response.location).to eq("/tools/files/_sserve/login")
+
+      get "/tools/files/hello.txt"
+      expect(last_response).to be_redirect
+      expect(last_response.location).to include("/tools/files/_sserve/login")
+    end
+
+    it "prefixes the fallback when a return path leaves the origin" do
+      config(password: "s3cret", prefix: "/files")
+      get "/files/_sserve/login", { "return_to" => "https://evil.test/phish" }
+      expect(last_response.body).to include('value="/"')
+
+      token = csrf_from(last_response.body, "/files/_sserve/login")
+      post "/files/_sserve/login", {
+        "password" => "s3cret",
+        "return_to" => "//evil.test",
+        "_csrf" => token
+      }
+      expect(last_response.location).to eq("/files")
+    end
+
+    it "prefixes the logout form on a generated error page" do
+      Dir.mkdir(File.join(@root, "empty"))
+      config(password: "s3cret", prefix: "/files", listings: false)
+      get "/files/_sserve/login"
+      token = csrf_from(last_response.body, "/files/_sserve/login")
+      post "/files/_sserve/login", { "password" => "s3cret", "return_to" => "/", "_csrf" => token }
+
+      get "/files/empty/"
+      expect(last_response.status).to eq(403)
+      expect(last_response.body).to include('action="/files/_sserve/logout"')
+    end
   end
 end

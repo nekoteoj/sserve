@@ -28,6 +28,6 @@ Specs call `App.build` with `rack-test`. They must not boot iodine or bind a por
 ## Auth and views
 
 - Session values are JSON. Use string keys (`session["authenticated"]`). Symbol keys do not survive the cookie.
-- `route_csrf` requires a path-specific token: `<%== csrf_tag("/_sserve/login") %>`. A bare `csrf_tag` fails. `<%==` is required because the render plugin escapes.
+- `route_csrf` requires a path-specific token for the browser path: `<%== csrf_tag(login_path) %>`. A bare `csrf_tag` fails. `<%==` is required because the render plugin escapes. With `--prefix`, that path includes the prefix because the check uses `SCRIPT_NAME` + `PATH_INFO`.
 - Generated pages live in `lib/sserve/views`. CSS is read once into `App::STYLESHEET` at load. `/_sserve` is reserved and is not looked up in the serve root.
 - Do not put a restrictive CSP on files served from the user's directory. That header is only for pages this app renders.
