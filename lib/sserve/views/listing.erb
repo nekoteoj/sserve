@@ -1,0 +1,52 @@
+<header class="bar">
+  <div class="bar__side">
+    <% if @parent %>
+      <a class="bar__button" href="<%= @parent %>">Back</a>
+    <% end %>
+  </div>
+  <h1 class="bar__title"><%= @title %></h1>
+  <div class="bar__side bar__side--end">
+    <% if @authenticated %>
+      <form method="post" action="/_sserve/logout">
+        <%== csrf_tag("/_sserve/logout") %>
+        <button class="bar__button" type="submit">Sign Out</button>
+      </form>
+    <% end %>
+  </div>
+</header>
+<main class="sheet">
+  <% if @entries.empty? %>
+    <p class="empty">This folder is empty.</p>
+  <% else %>
+    <ul class="list">
+      <% @entries.each do |entry| %>
+        <li>
+          <a class="row" href="<%= entry.href %>">
+            <span class="glyph <%= entry.directory ? "glyph--folder" : "glyph--file" %>" aria-hidden="true">
+              <% if entry.directory %>
+                <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M3.5 7.2A2.2 2.2 0 0 1 5.7 5h3.1c.5 0 1 .2 1.3.6l1 1.2h7.2A2.2 2.2 0 0 1 20.5 9v8.3a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2V7.2Z"/></svg>
+              <% else %>
+                <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M7 3.5h6.2L19 9.2V20a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 6 20V5A1.5 1.5 0 0 1 7.5 3.5H7Zm6 1.6V9h3.8L13 5.1Z"/></svg>
+              <% end %>
+            </span>
+            <span class="row__body">
+              <span class="row__name"><%= entry.name %></span>
+              <span class="row__meta">
+                <% if entry.directory %>
+                  Folder
+                <% else %>
+                  <%= human_size(entry.size) %> · <%= human_time(entry.mtime) %>
+                <% end %>
+              </span>
+            </span>
+            <% if entry.directory %>
+              <span class="chevron" aria-hidden="true">
+                <svg viewBox="0 0 12 20" width="8" height="14"><path d="M2 2l8 8-8 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+            <% end %>
+          </a>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+</main>
