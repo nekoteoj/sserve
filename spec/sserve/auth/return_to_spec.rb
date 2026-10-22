@@ -13,5 +13,7 @@ RSpec.describe Sserve::Auth::ReturnTo do
     expect(described_class.sanitize(nil)).to eq("/")
     expect(described_class.sanitize("")).to eq("/")
     expect(described_class.sanitize("files/a")).to eq("/")
+    expect(described_class.sanitize("/ok\r\nSet-Cookie: pwned=1")).to eq("/")
+    expect(described_class.sanitize("/ok\n")).to eq("/")
   end
 end

@@ -13,6 +13,7 @@ module Sserve
     STYLESHEET = File.read(File.join(VIEWS, "app.css")).freeze
     SESSION_KEY = "sserve.session"
     FILE_HEADERS = {"x-content-type-options" => "nosniff"}.freeze
+    FILE_STATUSES = [200, 206, 304, 416].freeze
     MONTHS = %w[Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec].freeze
 
     plugin :render, views: VIEWS, layout: "layout", escape: true, engine: "erb"
@@ -28,6 +29,7 @@ module Sserve
       csp.frame_ancestors :none
     end
     plugin :typecast_params
+    plugin :head
 
     def self.build(config)
       klass = Class.new(self)
@@ -177,6 +179,8 @@ module Sserve
 
     def serve_current
       result = catalog.lookup(request.path)
+      redirect_directory(result.directory_path) if result.directory_path
+
       case result.type
       when :file
         serve_file(result.path)
@@ -191,12 +195,32 @@ module Sserve
 
     def serve_file(path)
       relative = path == config.root ? "" : path.delete_prefix("#{config.root}/")
-      status, headers, body = file_server.call(request.env.merge("PATH_INFO" => "/#{relative}"))
-      request.halt [status, headers.merge(FILE_HEADERS), body]
+      # Rack::Files percent-decodes PATH_INFO. Escape the accepted relative
+      # path so decoding restores that file instead of a different one.
+      env = request.env.merge("PATH_INFO" => "/#{Rack::Utils.escape_path(relative)}")
+      status, headers, body = file_server.call(env)
+      request.halt [status, headers.merge(FILE_HEADERS), body] if FILE_STATUSES.include?(status)
+
+      close_body(body)
+      render_missing
+    end
+
+    def redirect_directory(real)
+      target = directory_url_path(real)
+      return if request.path == target
+
+      query = request.query_string
+      request.redirect(query.nil? || query.empty? ? target : "#{target}?#{query}")
+    end
+
+    def directory_url_path(real)
+      return "/" if real == config.root
+
+      "/#{real.delete_prefix("#{config.root}/")}/"
     end
 
     def render_listing(result)
-      path = request.path
+      path = directory_url_path(result.path)
       @title = listing_title(path)
       @entries = result.entries
       @authenticated = config.auth_required?
@@ -243,6 +267,10 @@ module Sserve
 
     def signed_in?
       config.auth_required? && session["authenticated"] == true
+    end
+
+    def close_body(body)
+      body.close if body.respond_to?(:close)
     end
   end
 end

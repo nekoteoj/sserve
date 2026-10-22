@@ -48,7 +48,7 @@ There is no username. When a password is set, a browser that is not signed in is
 
 Paths are resolved with `realpath` and must stay inside the serve root. A symlink that points outside the root is not served. Dotfiles are hidden, including from listings.
 
-An index file is served instead of a listing. With listings off and no index file, a directory request is forbidden. Other methods than `GET` and `HEAD` are rejected.
+An index file is served instead of a listing. A directory request that is not already the canonical trailing-slash URL is redirected to it, so relative links in that index keep working. With listings off and no index file, a directory request is forbidden. Other methods than `GET` and `HEAD` are rejected.
 
 iodine's built-in static file handler is not used. That handler answers in C and never reaches Ruby, so it cannot apply the password, the index name, or the listing switch.
 

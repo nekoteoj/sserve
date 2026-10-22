@@ -149,14 +149,93 @@ RSpec.describe Sserve::App do
   end
 
   it "answers HEAD and rejects other methods" do
-    config
+    config(listings: true)
 
     head "/hello.txt"
     expect(last_response.status).to eq(200)
+    expect(last_response.body).to eq("")
+
+    head "/"
+    expect(last_response.status).to eq(200)
+    expect(last_response.body).to eq("")
 
     post "/hello.txt"
     expect(last_response.status).to eq(405)
     expect(last_response.headers["allow"]).to eq("GET, HEAD")
+  end
+
+  it "does not serve an index file inside a hidden directory" do
+    Dir.mkdir(File.join(@root, ".hidden"))
+    File.write(File.join(@root, ".hidden", "index.html"), "SECRET INDEX")
+    config
+
+    get "/.hidden/index.html"
+
+    expect(last_response.status).to eq(404)
+    expect(last_response.body).not_to include("SECRET INDEX")
+  end
+
+  it "redirects a directory request to its canonical trailing slash" do
+    Dir.mkdir(File.join(@root, "docs"))
+    File.write(File.join(@root, "docs", "index.html"), "<link href=\"style.css\">")
+    File.write(File.join(@root, "docs", "note.txt"), "n")
+    config(listings: true)
+
+    get "/docs"
+    expect(last_response).to be_redirect
+    expect(last_response.location).to eq("/docs/")
+
+    get "/docs?x=1"
+    expect(last_response.location).to eq("/docs/?x=1")
+
+    follow_redirect!
+    expect(last_response.status).to eq(200)
+    expect(last_response.body).to include("style.css")
+    expect(last_response.headers["content-security-policy"]).to be_nil
+  end
+
+  it "redirects a double-slash directory request to the canonical path" do
+    Dir.mkdir(File.join(@root, "docs"))
+    File.write(File.join(@root, "docs", "note.txt"), "n")
+    config(listings: true)
+
+    status, headers, body = app.call(Rack::MockRequest.env_for("/").merge("PATH_INFO" => "//docs"))
+    text = +""
+    body.each { |chunk| text << chunk }
+    body.close if body.respond_to?(:close)
+
+    expect(status).to eq(302)
+    expect(headers["location"]).to eq("/docs/")
+    expect(text).not_to include("//docs")
+  end
+
+  it "serves the file that was accepted when its name contains percent escapes" do
+    Dir.mkdir(File.join(@root, "docs"))
+    File.write(File.join(@root, "docs", ".env"), "DOTENV")
+    File.write(File.join(@root, "docs%2f.env"), "literal")
+    config
+
+    get "/docs%2f.env"
+
+    expect(last_response.status).to eq(200)
+    expect(last_response.body).to eq("literal")
+    expect(last_response.headers["content-security-policy"]).to be_nil
+  end
+
+  it "does not put a return path with a newline into the location header" do
+    config(password: "s3cret")
+    get "/_sserve/login"
+    token = csrf_from(last_response.body, "/_sserve/login")
+
+    post "/_sserve/login", {
+      "password" => "s3cret",
+      "return_to" => "/ok\r\nSet-Cookie: pwned=1",
+      "_csrf" => token
+    }
+
+    expect(last_response).to be_redirect
+    expect(last_response.location).to eq("/")
+    expect(last_response.headers["set-cookie"]).not_to include("pwned")
   end
 
   it "expires an idle session" do

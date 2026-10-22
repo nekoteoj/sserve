@@ -59,6 +59,24 @@ RSpec.describe Sserve::Files::Catalog do
     expect(File.read(result.path)).to eq("hi")
   end
 
+  it "does not serve an index file inside a hidden directory" do
+    Dir.mkdir(File.join(@root, ".hidden"))
+    File.write(File.join(@root, ".hidden", "index.html"), "nope")
+
+    expect(catalog.lookup("/.hidden/index.html").type).to eq(:not_found)
+    expect(catalog.lookup("/.hidden/").type).to eq(:not_found)
+  end
+
+  it "builds listing links from the real directory, not the raw request path" do
+    Dir.mkdir(File.join(@root, "docs"))
+    File.write(File.join(@root, "docs", "note.txt"), "n")
+
+    result = catalog(listings: true).lookup("//docs")
+
+    expect(result.type).to eq(:listing)
+    expect(result.entries.map(&:href)).to eq(["/docs/note.txt"])
+  end
+
   it "does not follow a symlink out of the root" do
     outside = Dir.mktmpdir("sserve-catalog-out")
     File.write(File.join(outside, "secret.txt"), "nope")
