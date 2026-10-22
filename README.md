@@ -41,7 +41,7 @@ Binding a non-loopback address without a password prints a warning. The server s
 
 ## Authentication
 
-There is no username. When a password is set, a browser that is not signed in is redirected to `/_sserve/login` (under `--prefix`, when that is set). A correct password sets an encrypted cookie for 12 hours of idle time. Sign Out is on directory listings and on the generated error pages.
+There is no username. When a password is set, a browser that is not signed in is redirected to `/_sserve/login` (under `--prefix`, when that is set). A correct password sets an encrypted cookie for 12 hours of idle time. Restarting signs browsers out. The next login still works; a cookie from the previous process is ignored. Sign Out is on directory listings and on the generated error pages.
 
 `/_sserve` is reserved by the server and is not looked up in the directory you are serving.
 

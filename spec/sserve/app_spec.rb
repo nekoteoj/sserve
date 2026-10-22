@@ -40,6 +40,25 @@ RSpec.describe Sserve::App do
     post "/_sserve/login", { "password" => password, "return_to" => return_to, "_csrf" => token }
   end
 
+  def call_app(app, path)
+    status, headers, body = app.call(Rack::MockRequest.env_for(path))
+    text = +""
+    body.each { |chunk| text << chunk }
+    body.close if body.respond_to?(:close)
+    [status, headers, text]
+  end
+
+  def set_cookie_headers(response = last_response)
+    Array(response.headers["set-cookie"])
+  end
+
+  def live_session_pair(headers)
+    Array(headers["set-cookie"]).map { |header| header.split(";", 2).first }.find do |pair|
+      name, value = pair.split("=", 2)
+      name.match?(/\Asserve\.sid\.[0-9a-f]{16}\z/) && !value.to_s.empty?
+    end || raise("missing session cookie in #{headers["set-cookie"].inspect}")
+  end
+
   it "serves files with no login when a password is not set" do
     config
     get "/hello.txt"
@@ -105,6 +124,8 @@ RSpec.describe Sserve::App do
     login("s3cret", return_to: "/hello.txt")
     expect(last_response).to be_redirect
     expect(last_response.location).to eq("/hello.txt")
+    expect(last_response.headers["set-cookie"]).to include("sserve.sid.")
+    expect(last_response.headers["set-cookie"]).not_to include("max-age=0")
 
     get last_response.location
     expect(last_response.status).to eq(200)
@@ -349,6 +370,46 @@ RSpec.describe Sserve::App do
         "_csrf" => token
       }
       expect(last_response.location).to eq("/files")
+    end
+
+    it "logs in when a previous process's session cookie is sent first" do
+      config(password: "s3cret", prefix: "/files")
+      previous = described_class.build(
+        Sserve::Config.new(root: @root, password: "s3cret", prefix: "/files", session_secret: "a" * 64)
+      )
+      _status, previous_headers, _body = call_app(previous, "/files/_sserve/login")
+      stale = live_session_pair(previous_headers)
+      expect(stale).to start_with("sserve.sid.")
+
+      get "/files/_sserve/login", {}, { "HTTP_COOKIE" => "sserve.session=leftover; #{stale}" }
+      expect(last_response.status).to eq(200)
+      expired = set_cookie_headers.join("\n")
+      expect(expired).to include("sserve.session=; path=/; max-age=0")
+      expect(expired).to include("sserve.session=; path=/files; max-age=0")
+      expect(expired).to match(/sserve\.session=; path=\/; max-age=0; expires=[^;]+; secure/)
+      expect(expired).to match(/sserve\.session=; path=\/files; max-age=0; expires=[^;]+; secure/)
+      stale_name = stale.split("=", 2).first
+      expect(expired).to include("#{stale_name}=; path=/files; max-age=0")
+      expect(expired).to match(/#{Regexp.escape(stale_name)}=; path=\/files; max-age=0; expires=[^;]+; secure/)
+
+      fresh = live_session_pair(last_response.headers)
+      expect(fresh).to start_with("sserve.sid.")
+      expect(fresh).not_to start_with("#{stale_name}=")
+      token = csrf_from(last_response.body, "/files/_sserve/login")
+      post "/files/_sserve/login", {
+        "password" => "s3cret",
+        "return_to" => "/hello.txt",
+        "_csrf" => token
+      }, { "HTTP_COOKIE" => "#{stale}; sserve.session=leftover; #{fresh}" }
+
+      expect(last_response).to be_redirect
+      expect(last_response.location).to eq("/files/hello.txt")
+      signed_in = live_session_pair(last_response.headers)
+      expect(set_cookie_headers.join("\n")).not_to include("#{signed_in.split("=", 2).first}=;")
+
+      get "/files/hello.txt", {}, { "HTTP_COOKIE" => "#{stale}; sserve.session=leftover; #{signed_in}" }
+      expect(last_response.status).to eq(200)
+      expect(last_response.body).to eq("hi")
     end
 
     it "prefixes the logout form on a generated error page" do

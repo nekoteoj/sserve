@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "digest"
 require "rack/files"
 require "rack/utils"
 require "roda"
@@ -11,7 +12,9 @@ module Sserve
   class App < Roda
     VIEWS = File.expand_path("views", __dir__)
     STYLESHEET = File.read(File.join(VIEWS, "app.css")).freeze
-    SESSION_KEY = "sserve.session"
+    # Fixed name used before the cookie was tied to the process secret.
+    LEGACY_SESSION_KEY = "sserve.session"
+    SESSION_KEY_PATTERN = /\Asserve\.sid\.[0-9a-f]{16}\z/
     FILE_HEADERS = {"x-content-type-options" => "nosniff"}.freeze
     FILE_STATUSES = [200, 206, 304, 416].freeze
     MONTHS = %w[Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec].freeze
@@ -34,10 +37,14 @@ module Sserve
     def self.build(config)
       klass = Class.new(self)
       klass.opts[:sserve_config] = config
+      key = nil
       if config.auth_required?
+        # The name changes with the secret. A fixed name lets a cookie from the
+        # previous process hide this one, because Rack keeps the first of a name.
+        key = session_cookie_key(config.session_secret)
         klass.plugin :sessions,
           secret: config.session_secret,
-          key: SESSION_KEY,
+          key: key,
           max_idle_seconds: config.session_idle_seconds,
           max_seconds: nil,
           cookie_options: { path: config.prefix.empty? ? "/" : config.prefix }
@@ -48,8 +55,18 @@ module Sserve
           view("error")
         end
       end
-      Mount.new(klass.freeze.app, config.prefix)
+      app = klass.freeze.app
+      app = StaleSessionCookies.new(app, key: key, prefix: config.prefix) if key
+      Mount.new(app, config.prefix)
     end
+
+    # Cookie name for this process. Sixteen hex chars is enough to keep two
+    # processes on the same host from sharing a name; the secret itself stays
+    # out of the cookie jar.
+    def self.session_cookie_key(secret)
+      "sserve.sid.#{Digest::SHA256.hexdigest(secret)[0, 16]}"
+    end
+    private_class_method :session_cookie_key
 
     route do |r|
       apply_style_policy
@@ -322,6 +339,44 @@ module Sserve
       rest = path.delete_prefix(@prefix)
       env["SCRIPT_NAME"] = "#{env["SCRIPT_NAME"]}#{@prefix}"
       env["PATH_INFO"] = rest.empty? ? "/" : rest
+    end
+  end
+
+  # Expires session cookies this process will not read. A restart generates a
+  # new secret, so the previous cookie name is still in the browser. Deleting
+  # it keeps the jar from growing; the new name is what makes login work
+  # without asking the visitor to clear cookies.
+  class App::StaleSessionCookies
+    def initialize(app, key:, prefix:)
+      @app = app
+      @key = key
+      @paths = ["/", prefix.to_s].uniq.reject(&:empty?)
+    end
+
+    def call(env)
+      status, headers, body = @app.call(env)
+      stale_names(env["HTTP_COOKIE"]).each { |name| expire(headers, name) }
+      [status, headers, body]
+    end
+
+    private
+
+    def stale_names(header)
+      return [] if header.nil? || header.empty?
+
+      Rack::Utils.parse_cookies_header(header).keys.select { |name| stale?(name) }
+    end
+
+    def stale?(name)
+      name == App::LEGACY_SESSION_KEY || (name.match?(App::SESSION_KEY_PATTERN) && name != @key)
+    end
+
+    def expire(headers, name)
+      @paths.each do |path|
+        options = { path: path, httponly: true, same_site: :lax }
+        Rack::Utils.delete_cookie_header!(headers, name, options)
+        Rack::Utils.delete_cookie_header!(headers, name, options.merge(secure: true))
+      end
     end
   end
 end
